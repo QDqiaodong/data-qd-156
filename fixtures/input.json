@@ -1,0 +1,4 @@
+{
+  "fasta": ">chr1\nACGTACGT\n",
+  "vcf": "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\tS3\nchr1\t2\t.\tC\tT,G\t.\tPASS\t.\tGT\t0/1\t2/2\t./1\n"
+}
