@@ -15,6 +15,7 @@ python3 -m venv .venv
 .venv/bin/variant-cohort --source fixtures/input.json --output run/report.json
 .venv/bin/variant-cohort --source fixtures/phase.json --output run/phase.json --stitch-phase
 .venv/bin/variant-cohort --source fixtures/projection.json --output run/projection.json --project-assembly
+.venv/bin/variant-cohort --source fixtures/pedigree.json --output run/pedigree.json --audit-pedigree
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -26,8 +27,8 @@ python3 -m venv .venv
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。
 同输入重跑不累加。测试使用临时目录，运行产物在忽略的run/。
 
-src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，vcf.py 共用受限FASTA/VCF读取；
-common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase` 或 `--project-assembly` 选择模式（二者互斥）。
+src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，pedigree.py 为v4家系最小屏蔽审计，vcf.py 共用受限FASTA/VCF读取；
+common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase`、`--project-assembly` 或 `--audit-pedigree` 选择模式（三者互斥）。
 fixtures 为明确自制样例，代码与样例采用MIT许可。
 
 ## 业务与样例
@@ -55,3 +56,11 @@ VCF按 source_fasta 沿用v1核对；每个完整REF区间须由同一chain连�
 输出 `schema_version=3`、`mode="assembly_projection"`，含 samples、source_records、projected 与 rejected；
 GT按序列身份重编号，忽略相位分隔、保留倍性与缺失。源记录/样本/ALT/chains置换后结果不变（source_sha256除外）。
 完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/projection.json` 为端到端样例。
+
+# 家系最小屏蔽审计 v4（可选 `--audit-pedigree`，与其余开关互斥）
+输入改为 `fasta` + `vcf` + `families` + `weights`：1..32个样本、最多200行、每行1..4个ALT，仅接受二倍体GT（允许部分或全部缺失）。
+families声明双亲与子女，样本/家庭二部图必须为森林；weights为每样本1..1,000,000的整数屏蔽代价。
+每条记录独立求解：在满足全部家系传递约束的完整GT赋值中最小化屏蔽代价之和，精确统计最优赋值数
+（同一GT赋值的多个传递见证只计一次），并给出每样本全局GT支持与必屏蔽/可屏蔽集合。
+输出 `schema_version=4`、`mode="pedigree_audit"`；行/样本/ALT/家庭置换后结果不变（source_sha256除外）。
+完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/pedigree.json` 为端到端样例。
