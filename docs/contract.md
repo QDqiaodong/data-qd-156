@@ -60,3 +60,20 @@ FASTA唯一简短contig名、非空大写ACGTN序列。VCF固定4.2、制表符�
 
 对VCF行、样本列、ALT枚举（同步重映射GT）、families列表及亲本/子女顺序置换后，除 `source_sha256` 外报告须完全一致。非法输入退出2并保留已有输出的原字节；输入与输出不得相同，拒绝符号链接输出，成功后原子替换。运行保持离线且无第三方依赖。合成样例见 `fixtures/pedigree.json` 与 `tests/test_pedigree.py`，覆盖规范并列例（双亲0/0、子女0/1：代价1、赋值5、三者皆可屏蔽）、传递见证去重（0/1×0/1→0/1计1）、跨代共享缺失样本使两个局部可满足家庭整体非零、同胞联合约束、代价并列的全部支持与精确计数、ALT换序重编号、部分缺失重数、多等位、孤立缺失样本组合计数、多独立家庭计数乘积、32样本长链与宽同胞家族、小例独立穷举核对、非法家庭环/重复亲本对/多重子女身份/非法权重/单倍体及各项规模越界，并保留v1/v2/v3回归。
 
+# 队列样本重复候选筛查 v5（--audit-replicates）
+带 `--audit-replicates` 时同一CLI改用v5契约，输出队列样本两两重复样本候选筛查报告；不带开关的v1入口与 `--stitch-phase`、`--project-assembly`、`--audit-pedigree` 的入口、输入格式、字段与结果完全不变。该开关与另三个开关互斥，由argparse互斥组拒绝同时出现。本模式仅作离线数据质量筛查：不推断亲缘、身份或临床意义，不生成聚类，不把pairwise candidate边作传递闭包。
+
+外层JSON恰含 `fasta`、`vcf`、`minimum_informative_sites`、`max_discordance`，沿用受限JSON规则（拒绝重复键、非有限数值、未定义字段及超过大小限制的输入）；FASTA与VCF文本各<=2,000,000字符，外层原始JSON<=8,000,000字节。`fasta` 按v1的FASTA规则校验；`vcf` 沿用v1的VCF4.2固定列、QUAL/INFO为点、FILTER为PASS或点、REF与FASTA逐字相同及GT索引越界校验，但样本数限制为2..100、最多5000条数据行、每行1..16个不同的非REF ACGTN ALT。允许只有合法VCF header而无数据行：保留header样本列表，`source_records` 为0、`pairs` 仍输出全部样本对，每对证据不足。
+
+本模式每个样本每个记录仅允许GT格式；GT必须恰为两个由 `/` 或 `|` 分隔的合法等位索引或点，允许部分和全部缺失；拒绝单倍体（包括单独的点）、额外FORMAT字段与越界索引。只要任一拷贝为点，该样本在该条记录上的调用不完整；涉及该样本的样本对不把该记录计入 `complete_sites` 或 `informative_sites`。
+
+先验证每条记录身份 `(contig,position,ref,按字典序排列的alts)` 在整份输入中唯一；ALT枚举顺序不同但规范身份相同的记录也视为重复并整批拒绝。比较单位是原始VCF记录，不对位置或等位做trim、左对齐或跨记录合并。每条GT按该行的REF和ALT序列映射成两个序列等位，并按序列字典序排序为无序多重集；因此 `0/1` 与 `1|0` 等价，重复拷贝不可丢失，多ALT行的索引重编号不得改变身份。
+
+对样本名排序后生成全部无序样本对，字典序较小者固定为 `left`，每对恰输出一个结果。`complete_sites` 统计该对双方GT都完整的记录数，包括双方均为参考纯合的记录。`informative_sites` 仅计双方GT完整且至少一方携带非参考等位的记录。仅对informative记录计数：规范化后两侧GT多重集相等累加 `concordant_sites`，否则累加 `discordant_sites`；始终满足 `informative_sites = concordant_sites + discordant_sites`。双方参考纯合的共同调用只计入 `complete_sites`，不抬高一致率；含缺失拷贝的调用允许输入，但该样本对不计入该记录的任一分母。
+
+`minimum_informative_sites` 为1..5000正整数（不接受bool）。`max_discordance` 恰含 `numerator`、`denominator`：`denominator` 为正整数，`numerator` 为0..denominator的整数，均不接受bool或浮点，表示最大不一致比例。当 `informative_sites < minimum_informative_sites` 时状态为 `insufficient_evidence`；否则仅当 `discordant_sites * denominator <= informative_sites * numerator`（精确整数交叉相乘，不使用浮点，边界等号属于candidate）时状态为 `candidate`，其他为 `different`。`candidate` 只表示达到本输入阈值的重复样本线索，不证明样本相同。
+
+报告顶层恰含 `schema_version=5`、`mode="replicate_audit"`、`source_sha256`、`result`；`result` 恰含按字典序排列的 `samples`、`source_records`、`parameters`、`pairs`。`parameters` 恰含 `minimum_informative_sites` 与 `max_discordance`（原样以整数numerator/denominator对象输出）。`pairs` 按 `(left,right)` 排序；每项恰含 `left`、`right`、`complete_sites`、`informative_sites`、`concordant_sites`、`discordant_sites`、`status`、`mismatch_examples`、`omitted_mismatches`。`mismatch_examples` 按 `(contig,position,ref,按字典序排列的alts)` 排序、至多8项；每项恰含 `contig`、`position`、`ref`、`alts`、`left_gt`、`right_gt`，两侧GT是按序列字典序排列的完整序列字符串数组。保留规范顺序的前8个错配，`omitted_mismatches = discordant_sites - len(mismatch_examples)`。
+
+对样本列、VCF行、ALT枚举（同步重映射GT）及GT的 `/`、`|` 分隔置换后，除 `source_sha256` 外报告须完全一致。源记录身份重复、非法输入或任何内部计数不一致时退出2并保留已有输出原字节；输入与输出不得相同，拒绝符号链接输出，成功后原子替换。运行保持离线且无第三方依赖。合成样例见 `fixtures/replicate.json` 与 `tests/test_replicate.py`，覆盖多ALT换序后的GT重编号不改变pair结果、相位分隔符等价、部分/全缺失不进入两个分母、双方参考纯合不抬高informative分母及阈值分类、比例边界等号为candidate且超出一个错配为different、证据不足、空记录VCF仍输出全部样本对、错配证据规范排序与超过8条的省略计数、样本列/行/ALT/分隔符置换不变性、重复ALT集合身份、损坏输入、输出保留与符号链接拒绝、真实CLI端到端与模式互斥，并保留v1/v2/v3/v4回归。
+

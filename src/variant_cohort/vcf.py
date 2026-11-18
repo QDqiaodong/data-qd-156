@@ -20,7 +20,7 @@ def reference(text):
     if not result or any(not s for s in result.values()):raise ValueError('empty reference')
     return result
 
-def _rows(text,ref,fmt,parse_cells,max_samples=200,max_rows=5000,max_alts=16):
+def _rows(text,ref,fmt,parse_cells,min_samples=1,max_samples=200,max_rows=5000,max_alts=16):
     """Walk one bounded VCF, validating every shared structural rule.
 
     parse_cells(cell, alt_count) parses one sample cell for the declared format.
@@ -37,7 +37,7 @@ def _rows(text,ref,fmt,parse_cells,max_samples=200,max_rows=5000,max_alts=16):
             h=line.split('\t')
             if header is not None or h[:9]!=_COLUMNS:raise ValueError('invalid VCF columns')
             samples=h[9:]
-            if not 1<=len(samples)<=max_samples or len(set(samples))!=len(samples) or any(not _SAMPLE.fullmatch(s) for s in samples):raise ValueError('invalid samples')
+            if not min_samples<=len(samples)<=max_samples or len(set(samples))!=len(samples) or any(not _SAMPLE.fullmatch(s) for s in samples):raise ValueError('invalid samples')
             header=h;continue
         if header is None:raise ValueError('missing VCF header')
         row=line.split('\t')
@@ -75,6 +75,15 @@ def _gt_cell_diploid(cell,alt_count):
 def diploid_records(text,ref):
     """Bounded GT-only reader: every sample cell is exactly two allele copies."""
     return _rows(text,ref,'GT',_gt_cell_diploid,max_samples=32,max_rows=200,max_alts=4)
+
+def replicate_records(text,ref):
+    """GT-only reader for replicate screening: 2..100 samples, <=5000 rows, <=16 ALTs.
+
+    Every sample cell must be exactly two copies (index or dot, '/' or '|');
+    haploid cells, extra FORMAT fields and out-of-range indexes are rejected.
+    """
+    return _rows(text,ref,'GT',_gt_cell_diploid,min_samples=2,max_samples=100,
+                 max_rows=5000,max_alts=16)
 
 def phased_records(text,ref):
     """Bounded GT:PS reader: every cell is a phased diploid GT plus phase set."""

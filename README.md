@@ -16,6 +16,7 @@ python3 -m venv .venv
 .venv/bin/variant-cohort --source fixtures/phase.json --output run/phase.json --stitch-phase
 .venv/bin/variant-cohort --source fixtures/projection.json --output run/projection.json --project-assembly
 .venv/bin/variant-cohort --source fixtures/pedigree.json --output run/pedigree.json --audit-pedigree
+.venv/bin/variant-cohort --source fixtures/replicate.json --output run/replicate.json --audit-replicates
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -27,8 +28,8 @@ python3 -m venv .venv
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。
 同输入重跑不累加。测试使用临时目录，运行产物在忽略的run/。
 
-src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，pedigree.py 为v4家系最小屏蔽审计，vcf.py 共用受限FASTA/VCF读取；
-common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase`、`--project-assembly` 或 `--audit-pedigree` 选择模式（三者互斥）。
+src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，pedigree.py 为v4家系最小屏蔽审计，replicate.py 为v5队列样本重复候选筛查，vcf.py 共用受限FASTA/VCF读取；
+common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase`、`--project-assembly`、`--audit-pedigree` 或 `--audit-replicates` 选择模式（四者互斥）。
 fixtures 为明确自制样例，代码与样例采用MIT许可。
 
 ## 业务与样例
@@ -64,3 +65,10 @@ families声明双亲与子女，样本/家庭二部图必须为森林；weights�
 （同一GT赋值的多个传递见证只计一次），并给出每样本全局GT支持与必屏蔽/可屏蔽集合。
 输出 `schema_version=4`、`mode="pedigree_audit"`；行/样本/ALT/家庭置换后结果不变（source_sha256除外）。
 完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/pedigree.json` 为端到端样例。
+
+# 队列样本重复候选筛查 v5（可选 `--audit-replicates`，与其余开关互斥）
+输入改为 `fasta` + `vcf` + `minimum_informative_sites` + `max_discordance`：2..100个样本、最多5000行、每行1..16个ALT，仅接受二倍体GT（允许部分或全部缺失，缺失拷贝所在记录不进入该样本对的任一分母）。
+每条GT映射为REF/ALT序列的无序二倍体多重集，`/` 与 `|` 等价、ALT枚举顺序不影响身份；记录身份 `(contig,position,ref,排序后alts)` 重复整批拒绝。
+逐对统计 complete/informative/concordant/discordant 位点，informative 仅计双方完整且至少一方携带非REF等位的记录；比例判定用精确整数交叉相乘，边界等号属于 `candidate`，证据不足为 `insufficient_evidence`。
+输出 `schema_version=5`、`mode="replicate_audit"`，每对含至多8个按规范身份排序的错配例子与省略计数；不生成聚类、不做传递闭包、不推断身份或亲缘。样本列/行/ALT/分隔符置换后结果不变（source_sha256除外）。
+完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/replicate.json` 为端到端样例。
