@@ -14,6 +14,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip check
 .venv/bin/variant-cohort --source fixtures/input.json --output run/report.json
 .venv/bin/variant-cohort --source fixtures/phase.json --output run/phase.json --stitch-phase
+.venv/bin/variant-cohort --source fixtures/projection.json --output run/projection.json --project-assembly
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -25,8 +26,8 @@ python3 -m venv .venv
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。
 同输入重跑不累加。测试使用临时目录，运行产物在忽略的run/。
 
-src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，vcf.py 共用受限FASTA/VCF读取；
-common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase` 选择模式。
+src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，vcf.py 共用受限FASTA/VCF读取；
+common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase` 或 `--project-assembly` 选择模式（二者互斥）。
 fixtures 为明确自制样例，代码与样例采用MIT许可。
 
 ## 业务与样例
@@ -45,3 +46,12 @@ FASTA唯一简短contig名、非空大写ACGTN序列。VCF固定4.2、制表符�
 每个块以最小 (fragment_id, PS) 成员为anchor，成员带 flipped 标志，等位copies为两个0/1/null。
 全部分片合计<=5000行、样本并集<=200；置换分片/行/样本/ALT顺序结果不变（source_sha256除外）。
 完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/phase.json` 为链式连接样例。
+
+# 跨参考组装投影 v3（可选 `--project-assembly`，与 `--stitch-phase` 互斥）
+输入为 `source_fasta`、`target_fasta`、`vcf` 与 `chains`（1..128条显式链，每条1..5000个正向坐标block）。
+VCF按 source_fasta 沿用v1核对；每个完整REF区间须由同一chain连续覆盖（跨block时两侧都须紧邻），
+`-` 链整体反向互补（N仍为N），插入/删除仍是单跨度序列等位。目标REF须逐字等于转换后REF或某个ALT，
+否则记为 reference_mismatch；无完整覆盖记为 unmapped；多个不同可用目标记为 ambiguous；恰一个才投影。
+输出 `schema_version=3`、`mode="assembly_projection"`，含 samples、source_records、projected 与 rejected；
+GT按序列身份重编号，忽略相位分隔、保留倍性与缺失。源记录/样本/ALT/chains置换后结果不变（source_sha256除外）。
+完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/projection.json` 为端到端样例。
