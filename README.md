@@ -18,6 +18,7 @@ python3 -m venv .venv
 .venv/bin/variant-cohort --source fixtures/pedigree.json --output run/pedigree.json --audit-pedigree
 .venv/bin/variant-cohort --source fixtures/replicate.json --output run/replicate.json --audit-replicates
 .venv/bin/variant-cohort --source fixtures/cohort_merge.json --output run/cohort_merge.json --merge-cohorts
+.venv/bin/variant-cohort --source fixtures/qc_cohort.json --output run/qc_cohort.json --qc-cohort
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -30,7 +31,7 @@ python3 -m venv .venv
 同输入重跑不累加。测试使用临时目录，运行产物在忽略的run/。
 
 src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，pedigree.py 为v4家系最小屏蔽审计，replicate.py 为v5队列样本重复候选筛查，merge.py 为v6多批次联合基因型矩阵，vcf.py 共用受限FASTA/VCF读取；
-common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase`、`--project-assembly`、`--audit-pedigree`、`--audit-replicates` 或 `--merge-cohorts` 选择模式（五者互斥）。
+qc_cohort.py 为v7队列质量筛选，common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase`、`--project-assembly`、`--audit-pedigree`、`--audit-replicates`、`--merge-cohorts` 或 `--qc-cohort` 选择模式（六者互斥）。
 fixtures 为明确自制样例，代码与样例采用MIT许可。
 
 ## 业务与样例
@@ -84,3 +85,13 @@ families声明双亲与子女，样本/家庭二部图必须为森林；weights�
 输出 `schema_version=6`、`mode="cohort_merge"`，含 samples、source_cohorts、source_records 与 sites；
 批次/VCF行/样本列/ALT枚举置换后结果不变（source_sha256除外），失败退出2并保留旧输出原字节。
 完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/cohort_merge.json` 为端到端样例。
+
+# 队列质量筛选 v7（可选 `--qc-cohort`，与其余开关互斥）
+输入为 `fasta` + `vcf` + `policy`：2..100个样本、最多5000行、每行1..16个ALT，仅接受二倍体GT（`/` 或 `|`，允许部分或全部缺失）。
+policy 恰含 `min_sample_call_rate`、`min_site_call_rate`、`max_sample_heterozygosity`（各为 `{numerator,denominator}`）与 `min_site_alt_count`（0..100000整数）。
+先按规范化等位身份重映射GT并拒绝身份碰撞；样本阶段以全部数据行为分母，只有两拷贝均已知的GT计为called，`called=0` 时杂合率为null且不能通过，
+阈值用精确整数交叉相乘、边界等号保留。位点阶段只在保留样本上重新计算 called_samples/call_rate/alt_count/alt_carriers，
+先样本后位点、不迭代回补；双失败原因固定取字典序较小者（`high_heterozygosity`/`low_call_rate` 与 `low_alt_count`/`low_call_rate`）。
+输出 `schema_version=7`、`mode="cohort_qc"`，含 policy、source_records、samples、sample_metrics、excluded_samples、sites 与 excluded_sites；
+比值输出为最简整数分数、零分母为null，GT保留相位分隔符与拷贝顺序。行/样本列/ALT枚举/等价编码置换后结果不变（source_sha256除外）。
+完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/qc_cohort.json` 为端到端样例。

@@ -106,6 +106,26 @@ def replicate_records(text,ref):
     return _rows(text,ref,'GT',_gt_cell_diploid,min_samples=2,max_samples=100,
                  max_rows=5000,max_alts=16)
 
+def _gt_cell_diploid_phased(cell,alt_count):
+    """Exactly two copies (index or dot) joined by '/' or '|'.
+
+    Returns (copies, phased) so the source separator and copy order survive.
+    """
+    if not re.fullmatch(r'(?:[0-9]+|\.)(?:[/|])(?:[0-9]+|\.)',cell):raise ValueError('diploid GT required')
+    phased='|' in cell
+    copies=tuple(None if x=='.' else int(x) for x in re.split(r'[/|]',cell))
+    if any(x is not None and x>alt_count for x in copies):raise ValueError('GT allele out of range')
+    return copies,phased
+
+def qc_records(text,ref):
+    """Diploid GT reader for cohort QC: 2..100 samples, <=5000 rows, <=16 ALTs.
+
+    Every sample cell must be exactly two copies; haploid cells, extra FORMAT
+    fields and out-of-range indexes are rejected.
+    """
+    return _rows(text,ref,'GT',_gt_cell_diploid_phased,min_samples=2,max_samples=100,
+                 max_rows=5000,max_alts=16)
+
 def phased_records(text,ref):
     """Bounded GT:PS reader: every cell is a phased diploid GT plus phase set."""
     def cell(value,alt_count):

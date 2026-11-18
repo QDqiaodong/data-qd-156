@@ -94,3 +94,26 @@ FASTA唯一简短contig名、非空大写ACGTN序列。VCF固定4.2、制表符�
 
 输入的批次顺序、VCF行顺序、样本列顺序及ALT枚举顺序均可任意：置换这些顺序并同步重映射GT后，除 `source_sha256` 外报告必须完全相同。非法输入、跨批次REF冲突、批次内重复站点、全局样本重名、重复批次id或任何内部映射冲突均退出2并保留已有输出原字节；输入与输出不得相同，拒绝符号链接输出，成功时使用原子替换发布。运行保持离线且不增加第三方运行依赖。合成样例见 `fixtures/cohort_merge.json` 与 `tests/test_merge.py`，覆盖不同批次ALT并集与GT索引重映射、GT相位分隔符和拷贝顺序/倍性保留、部分缺失与单倍体、批次未观测站点为null而非0/0、样本/行/批次/ALT置换不变性、相同REF兼容站点合并、跨批次REF冲突、批次内重复站点与全局重名、空VCF批次、非法GT与规模上限（样本100/200、批次32、合计5000行、VCF 2MB）、重复JSON键与非有限数值、失败保留既有输出及符号链接拒绝、真实CLI端到端、新旧模式互斥，并保留v1/v2/v3/v4/v5回归。
 
+
+# 队列质量筛选 v7（--qc-cohort）
+带 `--qc-cohort` 时同一CLI改用v7契约，对单份二倍体队列VCF做确定性的样本/位点质量筛选并输出可审计报告；不带开关的v1入口与 `--stitch-phase`、`--project-assembly`、`--audit-pedigree`、`--audit-replicates`、`--merge-cohorts` 的入口、输入格式、字段与结果完全不变。该开关与另五个开关互斥，由argparse互斥组拒绝同时出现。本功能只做数据质量筛选，不推断亲缘或身份、不做变异调用、基因注释或临床解读，也不迭代回补被淘汰的元素。
+
+外层JSON恰含 `fasta`、`vcf`、`policy`，无其他字段，沿用受限JSON规则（拒绝重复键、非有限数值、未定义字段及超过大小限制的输入）；FASTA与VCF文本各<=2,000,000字符，外层原始JSON<=8,000,000字节。`fasta` 按v1的FASTA规则校验；`vcf` 沿用v1的VCF4.2固定列、QUAL/INFO为点、FILTER为PASS或点、FORMAT仅GT、REF与FASTA逐字相同及GT索引越界校验，但样本数限制为2..100、最多5000条数据行、每行1..16个不同的非REF ACGTN ALT。允许只有合法VCF header而无数据行的空记录VCF：其header样本仍进入 `sample_metrics`，`source_records` 为0，`sites`/`excluded_sites` 为空。
+
+本模式每个样本单元必须恰为两个由 `/` 或 `|` 连接的等位拷贝，每拷贝为合法非负索引或点；拒绝任何非二倍体GT（包括单独的点与单倍体）、额外FORMAT字段、多余分隔符与越界索引。两种分隔符在统计上等价，点表示缺失拷贝。输出保留原分隔符（`phased` 布尔值）与拷贝顺序。
+
+`policy` 恰含 `min_sample_call_rate`、`min_site_call_rate`、`max_sample_heterozygosity` 与 `min_site_alt_count`。前三者恰含 `numerator`、`denominator`，均为整数（不接受bool或浮点），`denominator` 为正且 `0 <= numerator <= denominator`；`min_site_alt_count` 为0..100000的整数。所有阈值比较一律用精确整数交叉相乘，不使用浮点，边界等号属于保留（通过）。
+
+先按每条记录的 `(contig,position,ref,alt)` 用v1“先裁后缀再裁前缀”规范化每个ALT的等位身份，并把GT数值索引重映射到该记录的规范化身份；同一规范化身份在整批内只允许出现一次，任何碰撞（含仅ALT枚举顺序不同或等价锚定表示不同而产生的同一身份）整批拒绝，不得覆盖、相加或重复输出。
+
+样本阶段以全部数据行为分母：`total_sites` 为数据行数；只有两个拷贝均已知的GT计为 `called_sites`，部分缺失与全缺失均不计；`heterozygous_sites` 只计两个已知拷贝不同的called位点（`1/1` 不是杂合）。样本仅在 `called_sites/total_sites >= min_sample_call_rate` 且 `heterozygous_sites/called_sites <= max_sample_heterozygosity` 时保留。`called_sites=0` 时杂合率为 `null`，该样本不能因空分母通过最大杂合率条件；`total_sites=0` 时调用率也为 `null` 且不能通过调用率条件。同时失败时排除原因固定为字典序较小者：`high_heterozygosity` 或 `low_call_rate`。
+
+位点阶段只在保留样本上重新计算，不回到输入样本集，也不因淘汰位点改变样本；过滤顺序固定为先样本后位点，不迭代回补。对每个规范化位点：`called_samples` 为两个拷贝均已知的保留样本数，`call_rate` 为 `called_samples/保留样本数`，`alt_count` 为所有保留样本中等于该ALT的已知拷贝数，`alt_carriers` 为携带至少一个该ALT拷贝的called样本数。位点仅在 `call_rate >= min_site_call_rate` 且 `alt_count >= min_site_alt_count` 时保留；同时失败时原因固定为字典序较小者：`low_alt_count` 或 `low_call_rate`。保留样本集为空时位点的 `called_samples` 为0、`call_rate` 为 `null`、`alt_count` 为0、`alt_carriers` 为0、`genotypes` 为空数组；调用率条件因空分母失败，淘汰原因仍按同一双失败规则取字典序较小者。
+
+报告顶层恰含 `schema_version=7`、`mode="cohort_qc"`、`source_sha256` 与 `result`；`result` 恰含 `policy`、`source_records`、`samples`、`sample_metrics`、`excluded_samples`、`sites` 与 `excluded_sites`。`policy` 按输入原样保存；`source_records` 为数据行总数；`samples` 为保留样本名字典序数组。`sample_metrics` 覆盖所有输入样本并按名字典序排列，每项恰含 `sample`、`total_sites`、`called_sites`、`call_rate`、`heterozygous_sites`、`heterozygosity`、`retained`；两个比值均为最简整数分数 `"numerator/denominator"`，零分母为 `null`，`retained` 为布尔值。`excluded_samples` 按 `(reason,sample)` 排列，每项恰含 `sample`、`reason`、`call_rate` 与 `heterozygosity`。
+
+`sites` 按 `(contig,position,ref,alt)` 排列，每项恰含 `contig`、`position`、`ref`、`alt`、`called_samples`、`call_rate`、`alt_count`、`alt_carriers` 与 `genotypes`；`genotypes` 按保留样本名字典序排列，元素为恰含 `alleles` 与 `phased` 的对象，`alleles` 为两个整数或null（REF为0、该ALT为1、其他已知ALT为0、缺失拷贝为null），`phased` 反映原GT使用 `|` 还是 `/`。`excluded_sites` 按同一 `(contig,position,ref,alt)` 排列，每项在上述统计字段外恰增 `reason`。position输出整数。空样本或空位点保留集也按上述结构确定性输出。
+
+最小语义例子：三条记录中样本S1的GT为 `0/1`、`0/.`、`0/0`，S2为 `0/0`、`1/1`、`./.`；两者 `total_sites` 均为3、`called_sites` 均为2、`heterozygous_sites` 均为1（`1/1` 不是杂合），第三条记录对S2是未调用而不是参考纯合 `0/0`。若样本阈值淘汰S2，位点指标必须只用S1重新计算，不能继续以两个输入样本为分母。
+
+对VCF数据行、样本列、ALT枚举（同步重映射GT数值索引）与输入批次等价表示（如共享锚定碱基的等价编码）同时置换后，除 `source_sha256` 外报告必须完全相同。非法输入、非二倍体GT、REF不匹配、样本或行数或ALT数超限、规范化身份碰撞或内部计数不一致均退出2并保留已有输出的原字节；输入与输出不得相同，拒绝符号链接输出，成功时使用原子替换发布。运行保持离线且不增加第三方运行依赖。合成样例见 `fixtures/qc_cohort.json` 与 `tests/test_qc_cohort.py`，覆盖完整/部分/全缺失调用、零分母杂合率与空样本集、阈值等号保留与收紧一步淘汰、样本与位点双失败原因固定、先样本后位点、淘汰样本改变位点分母、相位分隔符与拷贝顺序保留、ALT枚举置换与等价编码不改变身份、全输入置换不变性、规范化碰撞、重复JSON键与非有限数值、规模上限（样本2/100、5000行、16 ALT、VCF 2MB）、失败保留既有输出、符号链接拒绝、成功原子替换、真实CLI端到端、模式互斥，并保留v1至v6回归。

@@ -2,6 +2,7 @@ from fractions import Fraction
 from .common import require
 from .vcf import reference,records
 from .merge import merge_cohorts
+from .qc_cohort import qc_cohort
 
 def normalize(pos,ref,alt):
     while len(ref)>1 and len(alt)>1 and ref[-1]==alt[-1]:ref,alt=ref[:-1],alt[:-1]
