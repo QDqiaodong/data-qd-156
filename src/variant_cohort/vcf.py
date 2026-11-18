@@ -66,6 +66,27 @@ def _gt_cell(cell,alt_count):
 def records(text,ref):
     return _rows(text,ref,'GT',_gt_cell)
 
+def _gt_cell_phased(cell,alt_count):
+    """Haploid/diploid GT that also reports whether the source separator was '|'."""
+    if not re.fullmatch(r'(?:[0-9]+|\.)(?:[/|](?:[0-9]+|\.))?',cell):raise ValueError('haploid/diploid GT required')
+    if '|' in cell:
+        pieces,phased=cell.split('|'),True
+    elif '/' in cell:
+        pieces,phased=cell.split('/'),False
+    else:
+        pieces,phased=(cell,),False
+    copies=[None if x=='.' else int(x) for x in pieces]
+    if any(a is not None and a>alt_count for a in copies):raise ValueError('GT allele out of range')
+    return copies,phased
+
+def cohort_records(text,ref):
+    """GT-only reader for multi-cohort merging: 1..100 samples, <=5000 rows,
+    <=16 ALTs.  Haploid or diploid cells are accepted and each call is returned
+    as (copies, phased) so the '/' vs '|' choice and copy order survive.
+    """
+    return _rows(text,ref,'GT',_gt_cell_phased,min_samples=1,max_samples=100,
+                 max_rows=5000,max_alts=16)
+
 def _gt_cell_diploid(cell,alt_count):
     if not re.fullmatch(r'(?:[0-9]+|\.)(?:[/|])(?:[0-9]+|\.)',cell):raise ValueError('diploid GT required')
     copies=tuple(None if x=='.' else int(x) for x in re.split(r'[/|]',cell))

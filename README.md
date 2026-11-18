@@ -17,6 +17,7 @@ python3 -m venv .venv
 .venv/bin/variant-cohort --source fixtures/projection.json --output run/projection.json --project-assembly
 .venv/bin/variant-cohort --source fixtures/pedigree.json --output run/pedigree.json --audit-pedigree
 .venv/bin/variant-cohort --source fixtures/replicate.json --output run/replicate.json --audit-replicates
+.venv/bin/variant-cohort --source fixtures/cohort_merge.json --output run/cohort_merge.json --merge-cohorts
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -28,8 +29,8 @@ python3 -m venv .venv
 输入和输出不得相同，输出符号链接拒绝。单操作者批处理，不承诺并发发布或断电恢复。
 同输入重跑不累加。测试使用临时目录，运行产物在忽略的run/。
 
-src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，pedigree.py 为v4家系最小屏蔽审计，replicate.py 为v5队列样本重复候选筛查，vcf.py 共用受限FASTA/VCF读取；
-common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase`、`--project-assembly`、`--audit-pedigree` 或 `--audit-replicates` 选择模式（四者互斥）。
+src/variant_cohort/model.py 为v1业务模型，phase.py 为v2分片相位整理，project.py 为v3跨参考组装投影，pedigree.py 为v4家系最小屏蔽审计，replicate.py 为v5队列样本重复候选筛查，merge.py 为v6多批次联合基因型矩阵，vcf.py 共用受限FASTA/VCF读取；
+common.py 提供受限JSON及报告发布，cli.py 衔接数据链路并以 `--stitch-phase`、`--project-assembly`、`--audit-pedigree`、`--audit-replicates` 或 `--merge-cohorts` 选择模式（五者互斥）。
 fixtures 为明确自制样例，代码与样例采用MIT许可。
 
 ## 业务与样例
@@ -72,3 +73,14 @@ families声明双亲与子女，样本/家庭二部图必须为森林；weights�
 逐对统计 complete/informative/concordant/discordant 位点，informative 仅计双方完整且至少一方携带非REF等位的记录；比例判定用精确整数交叉相乘，边界等号属于 `candidate`，证据不足为 `insufficient_evidence`。
 输出 `schema_version=5`、`mode="replicate_audit"`，每对含至多8个按规范身份排序的错配例子与省略计数；不生成聚类、不做传递闭包、不推断身份或亲缘。样本列/行/ALT/分隔符置换后结果不变（source_sha256除外）。
 完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/replicate.json` 为端到端样例。
+
+# 多批次联合基因型矩阵 v6（可选 `--merge-cohorts`，与其余开关互斥）
+输入改为 `fasta` + `cohorts`（1..32个 `{id,vcf}`，id为1..64位 `[A-Za-z0-9_.-]+` 且全局唯一）：
+每份VCF含1..100个唯一样本、最多5000行、每行1..16个ALT，GT允许单倍体或二倍体（`/` 或 `|`，点缺失）；
+全部批次样本名互不重复且并集<=200，数据行合计<=5000，允许只有合法header的空VCF批次。
+批次以精确 `(contig,position)` 站点身份对齐，同站点REF须逐字相同（冲突整批失败），批次内重复站点整批拒绝，不trim、不左对齐、不合坐标不同的等价indel。
+联合 `alts` 取各批次ALT序列的字典序集合并集，每个GT拷贝按碱基序列身份重映射（REF仍为0、点仍为null），保留拷贝顺序、倍性、缺失及 `/` 与 `|` 相位；
+样本所在批次未观测该站点时输出null，显式 `0/0` 才是观测参考纯合。
+输出 `schema_version=6`、`mode="cohort_merge"`，含 samples、source_cohorts、source_records 与 sites；
+批次/VCF行/样本列/ALT枚举置换后结果不变（source_sha256除外），失败退出2并保留旧输出原字节。
+完整规则与验收覆盖见 [数据契约](docs/contract.md)，`fixtures/cohort_merge.json` 为端到端样例。

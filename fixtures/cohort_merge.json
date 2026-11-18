@@ -1,0 +1,13 @@
+{
+  "fasta": ">chr1\nACGTACGTACGTACGTACGTACGTACGTACGT\n",
+  "cohorts": [
+    {
+      "id": "batch-a",
+      "vcf": "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\nchr1\t2\t.\tC\tT\t.\tPASS\t.\tGT\t0/1\t1|0\nchr1\t5\t.\tA\tT\t.\tPASS\t.\tGT\t0/0\t1\n"
+    },
+    {
+      "id": "batch-b",
+      "vcf": "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS3\tS4\nchr1\t2\t.\tC\tG\t.\t.\t.\tGT\t1|0\t./1\nchr1\t8\t.\tT\tC\t.\tPASS\t.\tGT\t0/1\t./.\n"
+    }
+  ]
+}

@@ -77,3 +77,20 @@ FASTA唯一简短contig名、非空大写ACGTN序列。VCF固定4.2、制表符�
 
 对样本列、VCF行、ALT枚举（同步重映射GT）及GT的 `/`、`|` 分隔置换后，除 `source_sha256` 外报告须完全一致。源记录身份重复、非法输入或任何内部计数不一致时退出2并保留已有输出原字节；输入与输出不得相同，拒绝符号链接输出，成功后原子替换。运行保持离线且无第三方依赖。合成样例见 `fixtures/replicate.json` 与 `tests/test_replicate.py`，覆盖多ALT换序后的GT重编号不改变pair结果、相位分隔符等价、部分/全缺失不进入两个分母、双方参考纯合不抬高informative分母及阈值分类、比例边界等号为candidate且超出一个错配为different、证据不足、空记录VCF仍输出全部样本对、错配证据规范排序与超过8条的省略计数、样本列/行/ALT/分隔符置换不变性、重复ALT集合身份、损坏输入、输出保留与符号链接拒绝、真实CLI端到端与模式互斥，并保留v1/v2/v3/v4回归。
 
+# 多批次联合基因型矩阵 v6（--merge-cohorts）
+带 `--merge-cohorts` 时同一CLI改用v6契约，把多个样本互不重名的VCF批次合并成一个确定性联合基因型矩阵；不带开关的v1入口与 `--stitch-phase`、`--project-assembly`、`--audit-pedigree`、`--audit-replicates` 的入口、输入格式、字段与结果完全不变。该开关与另四个开关互斥，由argparse互斥组拒绝同时出现。本功能只做确定性合并与按序列身份重编号，不做变异调用、相位推断、基因注释或临床解读，也不推断未观测样本的基因型。
+
+外层JSON恰含 `fasta`、`cohorts`，沿用受限JSON规则（拒绝重复键、非有限数值、未定义字段及超过大小限制的输入）；外层原始JSON<=8,000,000字节，FASTA和每份VCF文本各<=2,000,000字符。`fasta` 按v1的FASTA规则校验。`cohorts` 为1..32项，每项恰含 `id`、`vcf`；`id` 为1..64位 `[A-Za-z0-9_.-]+` 字符串且全局唯一，重复id整批拒绝。
+
+每份VCF沿用v1的固定列、`FORMAT=GT`、QUAL/INFO为点、FILTER为PASS或点、FASTA REF逐字匹配、样本名规则及GT索引越界校验；每份VCF须有1..100个唯一样本，最多5000条数据行、每行1..16个不同的非REF ACGTN ALT。GT只接受现有解析器允许的单倍体或二倍体形式：单拷贝，或两个由 `/` 或 `|` 分隔的合法非负索引或点；越界索引与额外FORMAT字段拒绝。合并保留拷贝顺序、倍性、缺失拷贝（点仍为null）以及二倍体GT原来使用 `/`（phased=false）还是 `|`（phased=true）；单倍体输出 `phased=false`。允许只有合法header而无数据行的VCF：其样本仍进入全局 `samples` 与 `source_cohorts`，但不产生站点。
+
+所有批次的样本名并集必须互不重复（全局重名即整批失败）且最多200个；全部批次数据行合计最多5000条。以精确站点身份 `(contig, position)` 对齐批次记录：同一站点跨批次的REF必须完全相同，冲突即整批失败；每份VCF内同一 `(contig, position)` 最多一条记录，不因ALT不同或ALT次序不同而视为不同记录，批次内重复站点整批失败。不得trim、左对齐，也不得把不同坐标的等价indel合并。该身份策略只承诺同坐标REF兼容，避免对未经定义的拆分记录GT合并作推断。
+
+对同站点各批次记录的ALT序列取字典序集合并集，作为联合记录的 `alts`（REF不进入该列表）。按碱基序列身份重映射每个来源GT的拷贝：REF仍为0，ALT变为联合 `alts` 中从1开始的索引，点仍为null；不能直接复制来源数值索引，来源ALT枚举顺序不影响联合编号。若发生任何内部映射冲突（如来源索引找不到对应联合等位）整批失败。
+
+报告顶层恰含 `schema_version=6`、`mode="cohort_merge"`、`source_sha256`、`result`；`result` 恰含 `samples`、`source_cohorts`、`source_records`、`sites`。`samples` 为全部批次样本名并集按名字升序；`source_cohorts` 是按id升序的批次id数组（含空VCF批次）；`source_records` 是所有输入VCF数据行总数。`sites` 按 `(contig,position,ref)` 升序；每项恰含 `contig`、`position`、`ref`、`alts`、`source_cohorts`、`genotypes`。站点的 `source_cohorts` 为实际含该站点记录的批次id升序数组；`genotypes` 是与全局 `samples` 对齐的数组，元素为null或恰含 `alleles`、`phased` 的对象。`alleles` 长度保留源GT倍性（单倍体长度1、二倍体长度2），值为重映射后的整数等位索引或null，拷贝顺序与源GT一致。某个样本所在批次没有该站点记录时必须输出null，不能假定为0/0；只有来源记录存在且GT为 `0/0` 才输出观测到的参考纯合 `{"alleles":[0,0],"phased":false}`。position输出整数。
+
+最小语义例子：样本S1所在批次在chr1:2记录 `C>T`、GT `0/1`，样本S2所在批次在同坐标记录 `C>G`、GT `1|0`。联合ALT为 `[G,T]`，S1的GT为 `[0,2]` 且 `phased=false`，S2的GT为 `[1,0]` 且 `phased=true`；S2处的分隔符与拷贝顺序保留。若chr1:5只在S1的批次出现，S2在chr1:5的输出基因型为null，而S1的 `0/0`（若有）仍是显式观测参考纯合。
+
+输入的批次顺序、VCF行顺序、样本列顺序及ALT枚举顺序均可任意：置换这些顺序并同步重映射GT后，除 `source_sha256` 外报告必须完全相同。非法输入、跨批次REF冲突、批次内重复站点、全局样本重名、重复批次id或任何内部映射冲突均退出2并保留已有输出原字节；输入与输出不得相同，拒绝符号链接输出，成功时使用原子替换发布。运行保持离线且不增加第三方运行依赖。合成样例见 `fixtures/cohort_merge.json` 与 `tests/test_merge.py`，覆盖不同批次ALT并集与GT索引重映射、GT相位分隔符和拷贝顺序/倍性保留、部分缺失与单倍体、批次未观测站点为null而非0/0、样本/行/批次/ALT置换不变性、相同REF兼容站点合并、跨批次REF冲突、批次内重复站点与全局重名、空VCF批次、非法GT与规模上限（样本100/200、批次32、合计5000行、VCF 2MB）、重复JSON键与非有限数值、失败保留既有输出及符号链接拒绝、真实CLI端到端、新旧模式互斥，并保留v1/v2/v3/v4/v5回归。
+

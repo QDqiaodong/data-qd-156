@@ -1,6 +1,7 @@
 from fractions import Fraction
 from .common import require
 from .vcf import reference,records
+from .merge import merge_cohorts
 
 def normalize(pos,ref,alt):
     while len(ref)>1 and len(alt)>1 and ref[-1]==alt[-1]:ref,alt=ref[:-1],alt[:-1]
